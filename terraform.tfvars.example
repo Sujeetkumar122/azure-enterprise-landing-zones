@@ -1,0 +1,108 @@
+# Example terraform.tfvars for Enterprise Azure Landing Zones
+# Illustrating multi-tier Hub and Spoke with for_each and dynamic blocks
+
+resource_groups = {
+  "rg-hub-connectivity-prod" = {
+    location = "eastus"
+    tags     = { Tier = "Connectivity", Role = "Hub" }
+  }
+  "rg-spoke-app-prod" = {
+    location = "eastus"
+    tags     = { Tier = "Workload", Role = "Application" }
+  }
+  "rg-spoke-data-prod" = {
+    location = "eastus"
+    tags     = { Tier = "Data", Role = "Database" }
+  }
+}
+
+hub_vnet_name = "vnet-hub-core-eastus"
+hub_vnet_rg   = "rg-hub-connectivity-prod"
+
+spoke_vnets = {
+  "vnet-spoke-app-eastus"  = { resource_group_name = "rg-spoke-app-prod" }
+  "vnet-spoke-data-eastus" = { resource_group_name = "rg-spoke-data-prod" }
+}
+
+virtual_networks = {
+  "vnet-hub-core-eastus" = {
+    location            = "eastus"
+    resource_group_name = "rg-hub-connectivity-prod"
+    address_space       = ["10.100.0.0/16"]
+    dns_servers         = ["10.100.1.4"]
+    subnets = [
+      {
+        name             = "AzureFirewallSubnet"
+        address_prefixes = ["10.100.1.0/26"]
+      },
+      {
+        name             = "GatewaySubnet"
+        address_prefixes = ["10.100.2.0/27"]
+      },
+      {
+        name             = "snet-shared-services"
+        address_prefixes = ["10.100.10.0/24"]
+      }
+    ]
+  }
+  "vnet-spoke-app-eastus" = {
+    location            = "eastus"
+    resource_group_name = "rg-spoke-app-prod"
+    address_space       = ["10.101.0.0/16"]
+    subnets = [
+      {
+        name                                      = "snet-aks-nodes"
+        address_prefixes                          = ["10.101.1.0/24"]
+        private_endpoint_network_policies_enabled = true
+      },
+      {
+        name             = "snet-appgw-ingress"
+        address_prefixes = ["10.101.2.0/24"]
+      }
+    ]
+  }
+}
+
+network_security_groups = {
+  "nsg-aks-nodes-prod" = {
+    location            = "eastus"
+    resource_group_name = "rg-spoke-app-prod"
+    rules = [
+      {
+        name                       = "Allow-HTTPS-Inbound"
+        priority                   = 100
+        direction                  = "Inbound"
+        access                     = "Allow"
+        protocol                   = "Tcp"
+        destination_port_range     = "443"
+        source_address_prefix      = "VirtualNetwork"
+        destination_address_prefix = "*"
+      },
+      {
+        name                       = "Deny-All-Inbound-Default"
+        priority                   = 4096
+        direction                  = "Inbound"
+        access                     = "Deny"
+        protocol                   = "*"
+        destination_port_range     = "*"
+        source_address_prefix      = "*"
+        destination_address_prefix = "*"
+      }
+    ]
+  }
+}
+
+route_tables = {
+  "rt-spoke-to-firewall" = {
+    location            = "eastus"
+    resource_group_name = "rg-spoke-app-prod"
+    routes = [
+      {
+        name                   = "route-to-azure-firewall"
+        address_prefix         = "0.0.0.0/0"
+        next_hop_type          = "VirtualAppliance"
+        next_hop_in_ip_address = "10.100.1.4"
+      }
+    ]
+  }
+}

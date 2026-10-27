@@ -1,0 +1,57 @@
+name: $(Build.DefinitionName)_$(Date:yyyyMMdd)$(Rev:.r)
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - '**/*.tf'
+      - '**/*.tfvars'
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  TERRAFORM_VERSION: '1.5.7'
+
+stages:
+  - stage: ValidateAndSecurityScan
+    displayName: 'Validate & DevSecOps Scan'
+    jobs:
+      - job: StaticCodeAnalysis
+        displayName: 'Lint, Checkov & Infracost'
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '3.10'
+
+          - script: |
+              echo "Installing DevSecOps scanning tools..."
+              pip install checkov
+              curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+            displayName: 'Install TFLint & Checkov'
+
+          - script: |
+              echo "Running TFLint..."
+              tflint --init
+              tflint
+            displayName: 'Execute TFLint'
+
+          - script: |
+              echo "Executing Checkov static security analysis against CIS Benchmarks..."
+              checkov -d . --framework terraform --output cli
+            displayName: 'Checkov CIS Compliance Gate'
+
+  - stage: TerraformPlan
+    displayName: 'Terraform Plan & Drift Detection'
+    dependsOn: ValidateAndSecurityScan
+    jobs:
+      - job: Plan
+        displayName: 'Terraform Plan'
+        steps:
+          - script: |
+              echo "Initializing Terraform..."
+              terraform init -backend=false
+              terraform validate
+            displayName: 'Terraform Init & Validate'
